@@ -8,7 +8,7 @@ output: html_document
 
 ## Specifikacija
 
-Kompletnu specifikaciju za projekat moguce je pronaci [ovde](/home/nikola/Master/R/RVPII/assets/specifikacija.pdf). <br>
+Kompletnu specifikaciju za projekat moguce je pronaci [ovde](/home/nikola/Master/R/RVPII-projekat/specifikacija.pdf). <br>
 Skup podataka je javno dostupan za [preuzimanje](https://catalog.data.gov/dataset/iowa-liquor-sales). <br>
 
 ## Instalacija potrebnih resursa
@@ -133,7 +133,59 @@ spark_write_csv(df_filtered, path = output_file, mode = "overwrite", delimiter =
 
 ## Preliminarna analiza podataka
 
-### Korelaciona matrica numerickih obelezja
+### Deskriptivna statistika 
+
+```{r deskriptivna-statistika, eval=FALSE, include=FALSE}
+conf <- spark_config()
+conf$`sparklyr.shell.driver-memory` <- "12G"
+conf$spark.memory.fraction <- 0.9
+
+sc <- spark_connect(master = "local", config = conf)
+
+df <- spark_read_csv(sc, "Iowa_Liquor_Sales")
+
+numeric_df <- df %>%
+  select_if(is.numeric)
+
+glimpse(numeric_df)
+
+column_names <- colnames(numeric_df)
+
+calculate_summary <- function(col_name) {
+  numeric_df %>%
+    summarize(
+      count = n(),
+      min = min(!!sym(col_name)),
+      max = max(!!sym(col_name)),
+      mean = mean(!!sym(col_name)),
+      median = percentile_approx(!!sym(col_name), 0.5)
+    )
+}
+
+summary_stats_list <- lapply(column_names, function(col) {
+  calculate_summary(col) %>%
+    collect()
+})
+
+summary_matrix <- do.call(rbind, summary_stats_list)
+
+summary_matrix_df <- as.data.frame(summary_matrix)
+
+rownames(summary_matrix_df) <- column_names
+print(summary_matrix_df)
+
+install.packages("kableExtra", dependencies = TRUE)
+
+descriptive_statistics_matrix <- kable(summary_matrix_df, "html") %>%
+  kable_styling("striped", full_width = FALSE) %>%
+  as.character()
+
+writeLines(descriptive_statistics_matrix, "assets/descriptive_statistics_matrix.html") 
+```
+
+<iframe src="assets/descriptive_statistics_matrix.html" style="margin: 0 auto; display: block;" width="515px" height="230px"></iframe>
+
+### Korelaciona matrica obelezja
 
 ```{r korelaciona-matrica-obelezja, eval=FALSE, include=FALSE}
 conf <- spark_config()
@@ -182,4 +234,37 @@ p <- ggcorrplot(cor(correlation_matrix), hc.order = TRUE,
 ggsave("assets/correlation_plot.png", p)
 ```
 
-![](assets/Bottle_Volume_ml_vs_Bottles_Sold.png)
+![](assets/correlation_plot.png)
+## Klasifikacija
+
+### 1. Logisticka regresija
+
+```{r logisticka-regresija, echo=FALE, include=TRUE, eval=FALSE}
+conf <- spark_config()
+conf$`sparklyr.shell.driver-memory` <- "12G"
+conf$spark.memory.fraction <- 0.9
+
+sc <- spark_connect(master = "local", config = conf)
+
+df <- spark_read_csv(sc, "Iowa_Liquor_Sales")
+
+glimpse(df)
+
+category_mapping <- df %>%
+  select(Category_Group) %>%
+  distinct() %>%
+  mutate(Category_Index = monotonically_increasing_id())
+
+mapped_df <- df %>%
+  left_join(category_mapping, by = "Category_Group")
+
+glimpse(mapped_df)
+
+numeric_df <- mapped_df %>%
+  select_if(is.numeric)
+
+glimpse(numeric_df)
+
+
+
+```

@@ -1,0 +1,5 @@
+*.log
+.RData
+.Rhistory
+*.csv
+Iowa_Liquor_Sales

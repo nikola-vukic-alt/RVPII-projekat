@@ -1,15 +1,14 @@
 ---
 title: Analiza skupa hapsenja u Njujorku
-author: Nikola Vukic
+author: Nikola Vukic E2 68-2023
 output: html_document
 ---
-
-# Nikola Vukic E2 68-2023
 
 ## Specifikacija
 
 Kompletnu specifikaciju za projekat moguce je pronaci [ovde](/home/nikola/Master/R/RVPII-projekat/specifikacija.pdf). <br>
 Skup podataka je javno dostupan za [preuzimanje](https://catalog.data.gov/dataset/iowa-liquor-sales). <br>
+Projekat je pisan u programskom jeziku *R*. Koristi *spark* alat stoga je neophodna *JVM* instalacija. Pored ovoga neophodna je instalacija paketa, za sta je potreban *make* alat. Potrebne biblioteke su navedene u sledecem komadu koda.
 
 ## Instalacija potrebnih resursa
 
@@ -119,7 +118,7 @@ descriptive_statistics_matrix <- kable(summary_matrix_df, "html")
 
 writeLines(descriptive_statistics_matrix, "assets/descriptive_statistics_matrix.html") 
 ```
-**Rezultat racunanja deskriptivne stattisike polja:**
+**Rezultat racunanja deskriptivne statisike polja:**
 
 <iframe src="assets/descriptive_statistics_matrix.html" style="margin: 0 auto; display: block;" width="465px" height="180px"></iframe>
 
@@ -636,6 +635,8 @@ ggsave(
 ![](assets/elbow_plot.png)
 Na osnovu grafikona, za broj centgroida ce se uzeti **6** i **8**, za potrebe dva scenarija klasterizacije.
 
+### 2. Racunanje centroida
+
 ```{r k-means, eval=FALSE, include=TRUE}
 models <- list()
 preds <- list()
@@ -647,12 +648,6 @@ for (i in clusterisation_size) {
     models[[i]] <- ml_bisecting_kmeans(x = df, formula = formula, k = centroid_count[i], max_iter = 20)
     preds[[i]] <- ml_predict(models[[i]], newdata = df)
 }
-
-models[[1]]  
-models[[2]]  
-preds[[1]]
-preds[[2]]
-
 
 ```
 
@@ -684,9 +679,7 @@ ggsave(
 )
 ```
 
-![](assets/6_centroid_clustering.png)
-
-```{r 8-centroid-plotting, eval=FALSE, include=TRUE}
+```{r 8-centroid-plotting, eval=FALSE, include=FALSE}
 sampled_preds2 <- preds[[2]] %>% sample_n(10000)
 centroids <- models[[2]]$centers
 
@@ -714,4 +707,113 @@ ggsave(
 )
 ```
 
+### 3. Vizuelizacija odnosa izmedju vrednosti obelezja i pripadnosti klasteru
+
+![](assets/6_centroid_clustering.png)
 ![](assets/8_centroid_clustering.png)
+
+### 4. Prikaz strukture klastera
+
+```{r cluster-stats-6-centroids, eval=FALSE, include=TRUE}
+sample_df <- preds[[1]] %>%
+  sample_n(50000) %>%
+  collect()
+
+columns_to_drop <- c("features", "label")
+
+sample_df <- sample_df[!colnames(sample_df) %in% columns_to_drop]
+
+summary_df <- sample_df %>%
+  rename(cluster = prediction) %>%
+  group_by(cluster) %>%
+  summarise(
+    across(
+      everything(),
+      list(
+        mean = ~ round(mean(.), 2),
+        min = ~ round(min(.), 2),
+        max = ~ round(max(.), 2),
+        median = ~ round(median(.), 2),
+        sd = ~ round(sd(.), 2)
+      ),
+      .names = "{col}_{fn}"
+    )
+  )
+  
+transposed_df <- summary_df %>%
+  gather(key = "Statistika", value = "Value", -cluster) %>%
+  spread(key = cluster, value = Value)
+
+cluster_structure <- kable(transposed_df, "html") 
+
+writeLines(cluster_structure, "assets/cluster_structure_6.html") 
+```
+
+**Statistika vrednosti obelezja po klasterima, 6 centroida:**
+
+<iframe src="assets/cluster_structure_6.html" style="margin: 0 auto; display: block;" width="555px" height="705px"></iframe>
+
+```{r cluster-stats-8-centroids, eval=FALSE, include=FALSE}
+sample_df <- preds[[2]] %>%
+  sample_n(50000) %>%
+  collect()
+
+columns_to_drop <- c("features", "label")
+
+sample_df <- sample_df[!colnames(sample_df) %in% columns_to_drop]
+
+summary_df <- sample_df %>%
+  rename(cluster = prediction) %>%
+  group_by(cluster) %>%
+  summarise(
+    across(
+      everything(),
+      list(
+        mean = ~ round(mean(.), 2),
+        min = ~ round(min(.), 2),
+        max = ~ round(max(.), 2),
+        median = ~ round(median(.), 2),
+        sd = ~ round(sd(.), 2)
+      ),
+      .names = "{col}_{fn}"
+    )
+  )
+  
+transposed_df <- summary_df %>%
+  gather(key = "Statistika", value = "Value", -cluster) %>%
+  spread(key = cluster, value = Value)
+
+cluster_structure <- kable(transposed_df, "html") 
+
+writeLines(cluster_structure, "assets/cluster_structure_8.html") 
+```
+
+<br>
+**Statistika vrednosti obelezja po klasterima, 8 centroida:**
+
+<iframe src="assets/cluster_structure_8.html" style="margin: 0 auto; display: block;" width="665px" height="705px"></iframe>
+
+## Izvestaj
+
+1. Inicijalni zadrzano je 30% originalne velicine skupa, sto je rezultovalo u **8706351 redova**.
+2. U fazi obrade skupa podataka izbacene su sve kolone koje nisu bile relevantne za dalji rad.
+3. Raspodele nad pojedinacnim obilezjima nisu pogodne za graficki prikaz zbog nejednakog odnosa vrednosti na osama i `x` i `y`.
+4. Iz korelacione matrice preostalih obelezja uocena je *relativno* velika obrnuta korelacija izmedju obelezja `State_Bottle_Cost`, `Bottle_Volume_ml`,  te obelezja `Bottles_Sold`.
+5. Na osnovu prethodne tacke izvucena je **formula za klasifikaciju i klasterizaciju**: `Bottles_Sold ~ State_Bottle_Cost + Volume_Sold_Liters`
+6. Klasifikacija je vrsena na tri nacina: 
+   1. `Stabla odlucivanja`
+   2. `Logisticka regresija`
+   3. `Random forest`
+7. Klasterizacija je vrsena pomocu `k-means`, sa **6** i **8** centroida.
+
+#### Dodatna tumacenja
+
+##### Klasifikacija
+
+Klasifikacija je pokazala da su stabla odlucivanja i random forest mnogo bolji za klasifikaciju broja prodanih flasa. Ovo se lako zakljuci iz rezultata jer logisticka regresija ima tacnost modela od svega **0.451, 0.492, 0.523** u zavisnosti od broja iteracija (**10, 20, i 30**, respektivno). Dok stabla odlucivanja imaju najvecu tacnost od **0.832**. Ono sto se da primetiti jesste da tacnost poprilicno skace prelaskom sa 5 maksimalnih iteracija na 10 iteracija, ali vec sa 10 na 15 iteracija je porast zanemarljiv. Namece se logaritamski odnos porasta iteracija i dobitna na tacnosti. Random forest je neprimetno bolji od stabla odlucivanja sa tacnoscu od **0.837**. Takodje za random forest se da primetiti da tacnost ne zavisi od broja stabala nego iskljucivo od maksimalne dubine.<br>
+Scenariji pod kojima je vresan klasifikacija su **10, 20, ili 30 maksimalnih iteracija** te maksimalna dubina od **5, 10, ili 15**. Za random forest je probano svih 9 scenarija.<br>
+Sto se tice validacije rezultata, izvrsena je k-struka (petostruka) unakrsna validacija za svaki od navedenih metoda klasifikacije. Validacija je pokazala da je optimalan metod klasifikacije **stablo odlucivanja**.
+
+##### Klasterizacija
+
+Zbog primecenog pada sume kvadrata gresaka (**SSE**) pri broja centroida **6 i 8**, upravo je odabran ovaj broj centroida za dva scenarija klasterizacije. Rezultati klasterizacije su bili prikazani vizuelno ali izvucen je i statisticki uvid za sva obilezja svakog klastera.

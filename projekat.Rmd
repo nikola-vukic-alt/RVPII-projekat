@@ -585,3 +585,133 @@ ggsave("assets/combined_model_accuracies.png", plot = p, width = 10, height = 6)
 
 ## Klasterizacija
 
+### 1. Odabir broja centroida
+
+```{r k-exploration, eval=FALSE, include=TRUE}
+clustered <- list()
+
+min_cluster_count <- 2L
+max_cluster_count <- 10L
+search_field <- max_cluster_count - min_cluster_count + 1
+
+for (cluster_count in min_cluster_count:max_cluster_count) {
+  clustered[[cluster_count]] <- ml_bisecting_kmeans(
+    x = df, formula = formula,
+    k = cluster_count, max_iter = 20
+  )
+}
+
+k_errors <- numeric(search_field)
+
+for (i in min_cluster_count:max_cluster_count) {
+  k_errors[i - min_cluster_count + 1] <- clustered[[i]]$cost
+}
+
+k_errors_df <- data.frame(
+  clusters = min_cluster_count:max_cluster_count,
+  SSE = k_errors
+)
+
+k_elbow_plot <- ggplot(k_errors_df, aes(x = clusters, y = SSE)) +
+  geom_line() +
+  geom_point() +
+  labs(
+    x = "Broj klastera",
+    y = "Suma kvadrata gresaka (SSE)"
+  ) +
+  theme_minimal()
+
+png_filename <- "assets/elbow_plot.png"
+ggsave(
+  filename = png_filename,
+  plot = k_elbow_plot,
+  width = 10,
+  height = 6,
+  dpi = 300
+)
+```
+
+**Rezultujuci grafikon:**
+
+![](assets/elbow_plot.png)
+Na osnovu grafikona, za broj centgroida ce se uzeti **6** i **8**, za potrebe dva scenarija klasterizacije.
+
+```{r k-means, eval=FALSE, include=TRUE}
+models <- list()
+preds <- list()
+
+clusterisation_size <- c(1:2)
+centroid_count <- c(6, 8)
+
+for (i in clusterisation_size) {
+    models[[i]] <- ml_bisecting_kmeans(x = df, formula = formula, k = centroid_count[i], max_iter = 20)
+    preds[[i]] <- ml_predict(models[[i]], newdata = df)
+}
+
+models[[1]]  
+models[[2]]  
+preds[[1]]
+preds[[2]]
+
+
+```
+
+```{r 6-centroid-plotting, eval=FALSE, include=TRUE}
+sampled_preds1 <- preds[[1]] %>% sample_n(10000)
+centroids <- models[[1]]$centers
+
+centroids_df <- data.frame(
+  State_Bottle_Cost = centroids$State_Bottle_Cost,
+  Volume_Sold_Liters = centroids$Volume_Sold_Liters
+)
+
+plot_1 <- ggplot() +
+  geom_point(data = sampled_preds1, aes(x = State_Bottle_Cost, y = Volume_Sold_Liters, color = factor(prediction))) +
+  geom_point(data = centroids_df, aes(x = State_Bottle_Cost, y = Volume_Sold_Liters), color = "black", size = 1) +
+  labs(
+    x = "Cena flase",
+    y = "Zapremina u litrima",
+    color = "Klaster"
+  ) +
+  scale_color_manual(values = c("#1f77b4", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b")) +
+  theme_minimal()
+
+png_filename <- "assets/6_centroid_clustering.png"
+ggsave(
+  filename = png_filename, 
+  plot = plot_1, 
+  width = 10, height = 6, dpi = 300
+)
+```
+
+![](assets/6_centroid_clustering.png)
+
+```{r 8-centroid-plotting, eval=FALSE, include=TRUE}
+sampled_preds2 <- preds[[2]] %>% sample_n(10000)
+centroids <- models[[2]]$centers
+
+centroids_df <- data.frame(
+  State_Bottle_Cost = centroids$State_Bottle_Cost,
+  Volume_Sold_Liters = centroids$Volume_Sold_Liters
+)
+
+plot_2 <- ggplot() +
+  geom_point(data = sampled_preds2, aes(x = State_Bottle_Cost, y = Volume_Sold_Liters, color = factor(prediction))) +
+  geom_point(data = centroids_df, aes(x = State_Bottle_Cost, y = Volume_Sold_Liters), color = "black", size = 1) +
+  labs(
+    x = "Cena flase",
+    y = "Zapremina u litrima",
+    color = "Klaster"
+  ) +
+  scale_color_manual(values = c("#146296", "#ff7f0e", "#2ca02c", "#d62728", "#9467bd", "#8c564b", "#f0c85b", "#95c5e6")) +
+  theme_minimal()
+
+png_filename <- "assets/8_centroid_clustering.png"
+ggsave(
+  filename = png_filename, 
+  plot = plot_2, 
+  width = 10, height = 6, dpi = 300
+)
+```
+
+![](assets/8_centroid_clustering.png)

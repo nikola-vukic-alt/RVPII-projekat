@@ -485,3 +485,47 @@ ggsave("assets/rf_k_fold_validation.png", p)
 ```
 
 ![](assets/rf_k_fold_validation.png)
+
+#### Poredjene preciznosti za sve scenarije
+
+```{r result-comparison, eval=FALSE, include=TRUE}
+rf_df <- as.data.frame(as.table(rf_accuracies))
+colnames(rf_df) <- c("num_trees", "max_depth", "accuracy")
+rf_df$model <- "Random Forest"
+
+dtc_df <- data.frame(
+  num_trees = rep(1, length(max_depths)),
+  max_depth = max_depths,
+  accuracy = dtc_accuracies,
+  model = "Decision Tree"
+)
+
+lr_df <- data.frame(
+  num_trees = rep(0, length(max_depths)),
+  max_depth = max_iters,
+  accuracy = lr_accuracies,
+  model = "Logistic Regression"
+)
+
+rf_df$num_trees <- as.character(rf_df$num_trees)
+rf_df$max_depth <- as.character(rf_df$max_depth)
+dtc_df$num_trees <- as.character(dtc_df$num_trees)
+dtc_df$max_depth <- as.character(dtc_df$max_depth)
+lr_df$num_trees <- as.character(lr_df$num_trees)
+lr_df$max_depth <- as.character(lr_df$max_depth)
+
+combined_df <- bind_rows(rf_df, dtc_df, lr_df)
+
+p <- ggplot(combined_df, aes(x = max_depth, y = accuracy, fill = model, label = round(accuracy, 3))) +
+  geom_bar(stat = "identity", position = position_dodge(width = 0.8), width = 0.7) +
+  scale_fill_brewer(palette = "Set1") +
+  labs(x = "Max Depth", y = "Accuracy", fill = "Model") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  geom_text(aes(y = accuracy + 0.02), position = position_dodge(width = 0.8), size = 3, color = "black") +
+  facet_wrap(~ num_trees, scales = "free_x")
+
+ggsave("assets/combined_model_accuracies.png", plot = p, width = 10, height = 6)
+```
+
+![](assets/combined_model_accuracies.png)

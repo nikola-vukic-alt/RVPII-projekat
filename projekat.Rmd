@@ -20,6 +20,7 @@ library(tidyr)
 library(dplyr)
 library(magrittr)
 library(knitr)
+library(ggcorrplot)
 
 spark_install(version = "3.5.1")
 knitr::opts_knit$set(root.dir = "/home/nikola/Master/R/RVPII-projekat")
@@ -31,7 +32,7 @@ U ovoj fazi bice izbaceni redovi koji sadrze vrednosti obelezja koja nisu dostup
 
 ```{r preciscivanje-podataka, eval=FALSE, include=TRUE}
 conf <- spark_config()
-conf$`sparklyr.shell.driver-memory` <- "12G"
+conf$`sparklyr.shell.driver-memory` <- "16G"
 conf$spark.memory.fraction <- 0.9
 
 sc <- spark_connect(master = "local", config = conf)
@@ -158,12 +159,10 @@ ggsave(
 
 ```{r korelaciona-matrica-obelezja, eval=FALSE, include=TRUE}
 sampled_numeric_df <- df %>% 
-  sdf_sample(fraction = 0.5, replacement = FALSE) %>%
+  sdf_sample(fraction = 0.7, replacement = FALSE) %>%
   collect()
 
 correlation_matrix <- cor(sampled_numeric_df)
-
-library(ggcorrplot)
 
 p <- ggcorrplot(cor(correlation_matrix), hc.order = TRUE,
            type = "lower",
@@ -174,7 +173,7 @@ ggsave("assets/correlation_plot.png", p)
 ```
 
 **Matrica korelacije:**
-![Matrica korelacije skupa podataka](assets/correlation_plot.png)
+![](assets/correlation_plot.png)
 
 ## Klasifikacija
 
@@ -186,59 +185,177 @@ clusterisation_dataset <- sdf_random_split(
   validation=0.3
 )
 
-```
-
-### 1. Stabla odlucivanja
-
-##### Obucavanje i evaluacija preciznosti 
-
-```{r decision-tree-classifier, eval=FALSE, include=TRUE}
 training <- clusterisation_dataset$training 
 validation <- clusterisation_dataset$validation 
 
 formula <- Bottles_Sold ~ State_Bottle_Cost + Volume_Sold_Liters
 
 size <- c(1:3)
-
+max_iters <- size * 10
 max_depths <- size * 5
+```
+
+### 1. Stabla odlucivanja
+
+##### Obucavanje i evaluacija tacnosti 
+
+```{r decision-tree-classifier, eval=FALSE, include=TRUE}
 accuracies <- size
 
 for(i in size) {
   model <- training %>%
     ml_decision_tree_classifier(formula, max_depth = max_depths[[i]])
 
-  eval <- ml_evaluate(model, validation_df)
+  eval <- ml_evaluate(model, validation)
   
   accuracies[i] <- eval$Accuracy
 }
+
+dtc_accuracies <- accuracies
 ```
 
 ```{r dtc-depth-vs-accuracy, eval=FALSE, include=TRUE}
 results_df <- data.frame(max_depth = max_depths, accuracy = accuracies)
 
-p <- ggplot(results_df, aes(x = max_depth, y = accuracy)) +
-  geom_line() +
-  geom_point() +
+p <- ggplot(results_df, aes(x = factor(max_depth), y = accuracy)) +
+  geom_bar(stat = "identity", fill = "grey", color = "black") +  
   labs(x = "Maksimalna dubina",
-       y = "Preciznost modela") +
-  theme_minimal()
+       y = "Tacnost modela") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
 ggsave("assets/dtc_max_depth_vs_accuracy.png", plot = p, width = 8, height = 6)
 ```
 
 **Rezultujuci grafikon: **
 
-![Zavisnost preciznosti stabla odlucivanja od maksimalne dubine](assets/dtc_max_depth_vs_accuracy.png)
+![](assets/dtc_max_depth_vs_accuracy.png)
+
+#### Evaluacija preciznosti unakrsnom validacijom
 
 
 ```{r dtc-validation, eval=FALSE, include=TRUE}
 pip <- sc %>% 
     ml_pipeline() %>%
     ft_r_formula(formula) %>%
+    ml_decision_tree_classifier()
+
+param_grid <- list(
+  decision_tree_classifier = list(max_depth = max_depths)
+)
+
+evaluator <- ml_multiclass_classification_evaluator(
+  x=sc, 
+  metric_name="accuracy"
+)
+
+validator <- ml_cross_validator(
+  x=sc, 
+  estimator=pip, 
+  evaluator=evaluator, 
+  estimator_param_maps=param_grid, 
+  num_folds=5
+)
+
+fit <- ml_fit(x = validator, dataset = df)
+metrics <- ml_validation_metrics(fit)
+
+p <- metrics %>%
+  ggplot(aes(x = factor(max_depths), y = accuracy)) + 
+  geom_bar(stat = "identity", fill = "grey", color = "black") +
+  labs(x = "Maksimalna dubina",
+       y = "Tacnost modela")
+
+ggsave("assets/dtc_k_fold_validation.png", p)
+```
+
+**Tacnost u zavisnosti od dubine, procena napravljena unakrsenom validacijom:**
+
+![](assets/dtc_k_fold_validation.png)
+
+### 2. Logisticka regresija
+
+##### Obucavanje i ocena performansi
+
+```{r logistic-regression, eval=FALSE, include=TRUE}
+lr_precs <- size
+lr_recalls <- size
+lr_f_measures <- size
+lr_accuracies <- size
+
+for(i in size) {
+  model <- ml_logistic_regression(training, formula, max_iter = max_iters[[i]])
+  eval <- ml_evaluate(model, validation)
+  lr_precs[i] <- eval$weighted_precision()
+  lr_recalls[i] <- eval$weighted_recall()
+  lr_f_measures[i] <- eval$weighted_f_measure()
+  lr_accuracies[i] <- eval$accuracy()
+}
+```
+
+```{r lr-max-iters-vs-accuracy, eval=FALSE, include=TRUE}
+results_df <- data.frame(max_depth = max_iters, accuracy = lr_accuracies)
+
+p <- ggplot(results_df, aes(x = factor(max_depth), y = accuracy)) +
+  geom_bar(stat = "identity", fill = "grey", color = "black") +  
+  labs(x = "Broj iteracija",
+       y = "Tacnost modela") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+ggsave("assets/lr_max_iters_vs_accuracy.png", plot = p, width = 8, height = 6)
+
+results_df <- data.frame(max_depth = max_iters, accuracy = lr_f_measures)
+
+p <- ggplot(results_df, aes(x = factor(max_depth), y = accuracy)) +
+  geom_bar(stat = "identity", fill = "grey", color = "black") +  
+  labs(x = "Broj iteracija",
+       y = "Rezultujuci F1-skor") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+ggsave("assets/lr_max_iters_vs_lr_f_measures.png", plot = p, width = 8, height = 6)
+
+results_df <- data.frame(max_depth = max_iters, accuracy = lr_recalls)
+
+p <- ggplot(results_df, aes(x = factor(max_depth), y = accuracy)) +
+  geom_bar(stat = "identity", fill = "grey", color = "black") +  
+  labs(x = "Broj iteracija",
+       y = "Osetljivost modela") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+ggsave("assets/lr_max_iters_vs_lr_recalls.png", plot = p, width = 8, height = 6)
+
+results_df <- data.frame(max_depth = max_iters, accuracy = lr_precs)
+
+p <- ggplot(results_df, aes(x = factor(max_depth), y = accuracy)) +
+  geom_bar(stat = "identity", fill = "grey", color = "black") +  
+  labs(x = "Broj iteracija",
+       y = "Preciznost modela") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+ggsave("assets/lr_max_iters_vs_lr_precs.png", plot = p, width = 8, height = 6)
+```
+ 
+**Rezultujuci grafikoni:**
+ 
+![Tacnost u odnosu na broj iteracija](assets/lr_max_iters_vs_accuracy.png)
+![F1-skor u odnosu na broj iteracija](assets/lr_max_iters_vs_lr_f_measures.png)
+![Osetljivost u odnosu na broj iteracija](assets/lr_max_iters_vs_lr_recalls.png)
+![Preciznost u odnosu na broj iteracija](assets/lr_max_iters_vs_lr_precs.png)
+
+#### Evaluacija preciznosti unakrsnom validacijom
+
+```{r lr-validation, eval=FALSE, include=TRUE}
+pip <- sc %>% 
+    ml_pipeline() %>%
+    ft_r_formula(formula) %>%
     ml_logistic_regression()
 
 param_grid <- list(
-  logistic_regression = list(max_iter = max_depths)
+  logistic_regression = list(max_iter = max_iters)
 )
 
 evaluator <- ml_multiclass_classification_evaluator(
@@ -256,10 +373,54 @@ validator <- ml_cross_validator(
 fit <- ml_fit(x = validator, dataset = df)
 metrics <- ml_validation_metrics(fit)
 
-p <- metrics %>% 
-  ggplot(aes(max_depths, accuracy)) + 
-  geom_line()
+p <- metrics %>%
+  ggplot(aes(x = factor(max_depths), y = accuracy)) + 
+  geom_bar(stat = "identity", fill = "grey", color = "black") +
+  labs(x = "Maksimalan broj iteracija",
+       y = "Preciznost modela")
 
-ggsave("assets/dtc_k_fold_validation.png", p)
-clearFn1()
+ggsave("assets/lr_k_fold_validation.png", p)
 ```
+
+**Tacnost u zavisnosti od maksimalnog broja iteracija, procena napravljena unakrsenom validacijom:**
+
+![](assets/lr_k_fold_validation.png)
+
+### 3. Random Forest
+
+##### Obucavanje i ocena tacnosti
+
+```{r random-forest, eval=FALSE, include=TRUE}
+rf_accuracies <- matrix(nrow = 3, ncol = 3)
+
+tree_count <- max_depths
+
+for(i in size) {
+  for(j in size) {
+    model <- ml_random_forest_classifier(
+      training,
+      formula, 
+      num_trees = tree_count[[i]], 
+      max_depth = max_depths[[j]]
+    )
+    eval <- ml_evaluate(model, validation)
+    
+    rf_accuracies[i, j] <- eval$Accuracy
+  }
+}
+```
+
+```{r rf-tree-count-vs-accuracy, eval=FALSE, include=TRUE}
+results_df <- data.frame(num_trees = tree_count, accuracy = rf_accuracies)
+
+p <- ggplot(results_df, aes(x = factor(tree_count), y = accuracy)) +
+  geom_bar(stat = "identity", fill = "grey", color = "black") +  
+  labs(x = "Broj stabala",
+       y = "Tacnost modela") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+ggsave("assets/rf_tree_count_vs_accuracy.png", plot = p, width = 8, height = 6)
+```
+
+![Tacnost u odnosu na broj stabala](assets/rf_tree_count_vs_accuracy.png)

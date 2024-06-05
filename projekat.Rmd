@@ -21,6 +21,7 @@ library(dplyr)
 library(magrittr)
 library(knitr)
 library(ggcorrplot)
+library(reshape2)
 
 spark_install(version = "3.5.1")
 knitr::opts_knit$set(root.dir = "/home/nikola/Master/R/RVPII-projekat")
@@ -408,19 +409,79 @@ for(i in size) {
     rf_accuracies[i, j] <- eval$Accuracy
   }
 }
+
+dimnames(rf_accuracies) <- list(
+  paste("Trees", tree_count),
+  paste("Depth", max_depths)
+)
+
+rf_accuracies
 ```
 
 ```{r rf-tree-count-vs-accuracy, eval=FALSE, include=TRUE}
-results_df <- data.frame(num_trees = tree_count, accuracy = rf_accuracies)
+results_df <- as.data.frame(rf_accuracies)
+results_df <- cbind(expand.grid(Trees = c(5, 10, 15), Depth = c(5, 10, 15)), results_df)
 
-p <- ggplot(results_df, aes(x = factor(tree_count), y = accuracy)) +
-  geom_bar(stat = "identity", fill = "grey", color = "black") +  
-  labs(x = "Broj stabala",
-       y = "Tacnost modela") +
+trees <- c(5, 10, 15)
+depths <- c(5, 10, 15)
+
+results_df <- expand.grid(Trees = trees, Depth = depths)
+results_df$Accuracy <- as.vector(rf_accuracies)
+
+p <- ggplot(results_df, aes(x = factor(Depth), y = factor(Trees), fill = Accuracy, label = round(Accuracy, 3))) +
+  geom_tile(color = "white") +
+  scale_fill_gradient(low = "#f05959", high = "#5986f0") +
+  labs(x = "Maksimalna dubina", y = "Broj stabala", fill = "Tacnost") +
   theme_minimal() +
-  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  geom_text(size = 3, color = "black")
 
-ggsave("assets/rf_tree_count_vs_accuracy.png", plot = p, width = 8, height = 6)
+ggsave("assets/random_forest_accuracies_matrix.png", plot = p, width = 8, height = 6)
+```
+**Rezultujuci grafikon:**
+
+![](assets/random_forest_accuracies_matrix.png)
+
+#### Evaluacija preciznosti unakrsnom validacijom
+
+```{r rf-validation, eval=FALSE, include=TRUE}
+pip <- sc %>% 
+    ml_pipeline() %>%
+    ft_r_formula(formula) %>%
+    ml_random_forest_classifier()
+
+param_grid <- list(
+  random_forest_classifier = list(
+    max_depth = max_depths, 
+    num_trees = tree_count
+  )
+)
+
+evaluator <- ml_multiclass_classification_evaluator(
+  x=sc, 
+  metric_name="accuracy"
+)
+
+validator <- ml_cross_validator(
+  x=sc, 
+  estimator=pip, 
+  evaluator=evaluator, 
+  estimator_param_maps=param_grid, 
+  num_folds=5
+)
+
+fit <- ml_fit(x = validator, dataset = df)
+metrics <- ml_validation_metrics(fit)
+
+p <- ggplot(metrics, aes(x = factor(max_depth_1), y = factor(num_trees_1), fill = accuracy, label = round(accuracy, 3))) +
+  geom_tile(color = "white") +
+  scale_fill_gradient(low = "#f05959", high = "#5986f0") +
+  labs(x = "Maksimalna dubina", y = "Broj stabala", fill = "Tacnost") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  geom_text(size = 3, color = "black")
+
+ggsave("assets/rf_k_fold_validation.png", p)
 ```
 
-![Tacnost u odnosu na broj stabala](assets/rf_tree_count_vs_accuracy.png)
+![](assets/rf_k_fold_validation.png)

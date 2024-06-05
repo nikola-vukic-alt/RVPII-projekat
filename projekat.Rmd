@@ -22,6 +22,7 @@ library(magrittr)
 library(knitr)
 library(ggcorrplot)
 library(reshape2)
+library(scales)
 
 spark_install(version = "3.5.1")
 knitr::opts_knit$set(root.dir = "/home/nikola/Master/R/RVPII-projekat")
@@ -125,16 +126,67 @@ writeLines(descriptive_statistics_matrix, "assets/descriptive_statistics_matrix.
 ### 2. Vizualizovanje raspodele po pojedinacnim obelezjima
 
 ```{r sampling-utils, eval=FALSE, include=FALSE}
-sample_df <- sdf_sample(df, 0.5, TRUE, 123)
+sample_df <- sdf_sample(df, 0.7, TRUE, 123)
+```
+```{r vr-pack, eval=FALSE, include=FALSE}
+grouped_df <- sample_df %>%
+  group_by(Pack) %>%
+  summarise(count = n()) %>%
+  collect()
+
+hist <- ggplot(grouped_df, aes(x = Pack, y = count)) +
+  geom_bar(stat = "identity", fill = "black") +
+  labs(
+    x = "Broj flasa u pakovanju",
+    y = "Broj kupovina"
+  ) +
+  scale_x_continuous(limits = c(0, 50), labels = comma_format(), breaks = seq(0, 50, by = 5)) +  
+  scale_y_continuous(labels = comma_format()) +  
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+png_filename <- "assets/pack.png"
+ggsave(
+  filename = png_filename, 
+  plot = hist, 
+  width = 10, height = 6, dpi = 300
+)
 ```
 
-```{r vr-Bottles_Sold, eval=FALSE, include=FALSE }
+![](assets/pack.png)
+
+```{r vr-state-bottle-cost, eval=FALSE, include=FALSE}
+grouped_df <- sample_df %>%
+  group_by(State_Bottle_Cost) %>%
+  summarise(count = n()) %>%
+  collect()
+
+hist <- ggplot(grouped_df, aes(x = State_Bottle_Cost, y = count)) +
+  geom_bar(stat = "identity", fill = "black") +
+  labs(
+    x = "Cena flase na nivou drzave",
+    y = "Broj kupovina"
+  ) +
+  scale_x_continuous(limits = c(0, 21), labels = comma_format(), breaks = seq(0, 21, by = 3)) +  
+  scale_y_continuous(labels = comma_format()) +   
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+
+png_filename <- "assets/state_bottle_cost.png"
+ggsave(
+  filename = png_filename, 
+  plot = hist, 
+  width = 10, height = 6, dpi = 300
+)
+```
+
+![](assets/state_bottle_cost.png)
+
+```{r vr-bottles_sold, eval=FALSE, include=FALSE }
 grouped_df <- sample_df %>%
   group_by(Bottles_Sold) %>%
   summarise(count = n()) %>%
   collect()
-
-glimpse(grouped_df)
 
 hist <- ggplot(grouped_df, aes(x = Bottles_Sold, y = count)) +
   geom_bar(stat = "identity", fill = "black") +
@@ -142,12 +194,11 @@ hist <- ggplot(grouped_df, aes(x = Bottles_Sold, y = count)) +
     x = "Broj prodanih flasa",
     y = "Broj kupovina"
   ) +
-  scale_x_continuous(limits = c(0, 1000), labels = scales::comma, breaks = seq(0, 1000, by = 200)) +  # Adjust the upper limit to 1000
-  scale_y_continuous(labels = scales::comma, breaks = seq(0, 1000, by = 200)) +  # Adjust the upper limit to 1000 for y-axis as well
+  scale_x_continuous(limits = c(0, 50), labels = comma_format(), breaks = seq(0, 50, by = 5)) +  
+  scale_y_continuous(labels = comma_format()) +  
   theme_minimal() +
   theme(axis.text.x = element_text(angle = 45, hjust = 1))
 
-# Save the modified histogram
 png_filename <- "assets/bottles_sold.png"
 ggsave(
   filename = png_filename, 
@@ -155,6 +206,8 @@ ggsave(
   width = 10, height = 6, dpi = 300
 )
 ```
+
+![](assets/bottles_sold.png)
 
 ### 3. Korelaciona matrica obelezja
 
@@ -486,7 +539,7 @@ ggsave("assets/rf_k_fold_validation.png", p)
 
 ![](assets/rf_k_fold_validation.png)
 
-#### Poredjene preciznosti za sve scenarije
+### 4. Poredjenja tacnosti za sve scenarije
 
 ```{r result-comparison, eval=FALSE, include=TRUE}
 rf_df <- as.data.frame(as.table(rf_accuracies))
@@ -529,3 +582,6 @@ ggsave("assets/combined_model_accuracies.png", plot = p, width = 10, height = 6)
 ```
 
 ![](assets/combined_model_accuracies.png)
+
+## Klasterizacija
+
